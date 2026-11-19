@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Sum up 18 November 2026's world news in one image.
+"""Sum up 18 November 2026's world news in one image (rev2: dense edition).
 
 Renders a 1024x1024 newspaper front page (THE WORLD IN ONE DAY) with the
 six verified stories of Wednesday 18 November 2026, plus an ALSO TODAY strip
 and a sources footer. Country names get their flag, people get their cartoon
 portrait, companies get a drawn ticker mark.
+
+Rev2 changes (user feedback: the news content was too brief): every story
+deck is expanded to a full multi-line article text built only from the
+verified facts in NEWS_FACTS.md, the deck font auto-fits so no card
+overflows, the numbers strip gains a 7th stat, and ALSO TODAY becomes a
+proper three-item section with two lines per item.
 
 Render path (Pillow available): draws the page with Pillow and writes it to
 $MAKEFUN_OUTPUT_DIR/entry.png.
@@ -75,6 +81,19 @@ def wrap_text(draw, text, font, max_w):
             lines[-2] = " ".join(prev[:-1])
             lines[-1] = moved + " " + lines[-1]
     return lines
+
+
+def fit_deck(draw, deck, max_w, max_h):
+    """Pick the largest deck font (13 down to 10.5) whose wrapped lines fit
+    in max_h, so a long deck never overlaps the visual area below it."""
+    for size in (13, 12.5, 12, 11.5, 11, 10.5):
+        font = _font("DejaVuSans.ttf", size)
+        line_h = int(size + 4)
+        lines = wrap_text(draw, deck, font, max_w)
+        if len(lines) * line_h <= max_h:
+            return font, lines, line_h
+    font = _font("DejaVuSans.ttf", 10.5)
+    return font, wrap_text(draw, deck, font, max_w), int(10.5 + 4)
 
 
 def draw_flag(draw, img, code, right, y, h):
@@ -226,7 +245,9 @@ def draw_store(draw, x, y, w, h):
 def draw_card(img, draw, x, y, w, h, cat, cat_key, flags, headline, deck,
               visual, portraits=()):
     """One story card: white rounded card, category + flags on top,
-    headline, deck, and a visual area anchored to the bottom."""
+    headline, a long auto-fitted deck, and a compact visual anchored to
+    the bottom. Portraits get a taller visual slot (76px); the drawn
+    visuals get 64px, so the deck has room for 7-9 lines of text."""
     draw.rounded_rectangle([x, y, x + w, y + h], radius=6, fill=CARD_BG,
                            outline=CARD_BORDER)
     pad = 14
@@ -245,38 +266,39 @@ def draw_card(img, draw, x, y, w, h, cat, cat_key, flags, headline, deck,
     for line in wrap_text(draw, headline, f_head, cw):
         draw.text((cx, hy), line, font=f_head, fill=INK)
         hy += 30
-    # deck
-    f_deck = _font("DejaVuSans.ttf", 14)
-    dy = hy + 6
-    for line in wrap_text(draw, deck, f_deck, cw):
-        draw.text((cx, dy), line, font=f_deck, fill=(51, 51, 51))
-        dy += 19
-    # visual area anchored to the bottom
-    vh = 96
+    # deck: auto-fit so it never reaches the visual area
+    vh = 76 if visual == "portraits" else 64
     vy = y + h - pad - vh
+    dy = hy + 6
+    max_deck_h = vy - 6 - dy
+    f_deck, deck_lines, line_h = fit_deck(draw, deck, cw, max_deck_h)
+    for line in deck_lines:
+        draw.text((cx, dy), line, font=f_deck, fill=(51, 51, 51))
+        dy += line_h
+    # visual area anchored to the bottom
     vw = cw
     if visual == "portraits":
-        d = 72
+        d = 64
         total = d * len(portraits) + 16 * (len(portraits) - 1)
         px = cx + (cw - total) // 2
         base = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "assets")
         for name in portraits:
             circ = circle_portrait(img, os.path.join(base, name + ".png"), d)
-            img.paste(circ, (px, vy + 8), circ)
-            draw.ellipse([px, vy + 8, px + d - 1, vy + 8 + d - 1],
+            img.paste(circ, (px, vy + 6), circ)
+            draw.ellipse([px, vy + 6, px + d - 1, vy + 6 + d - 1],
                          outline=(26, 26, 26), width=2)
             px += d + 16
     elif visual == "radar":
-        draw_radar(draw, cx + 40, vy + 6, vw - 80, vh - 10)
+        draw_radar(draw, cx + 40, vy + 4, vw - 80, vh - 8)
     elif visual == "chart":
-        draw_chart(draw, cx + 40, vy + 10, vw - 80, vh - 16)
+        draw_chart(draw, cx + 40, vy + 6, vw - 80, vh - 12)
     elif visual == "laptop":
-        draw_laptop(draw, cx + 40, vy + 6, vw - 80, vh - 10)
+        draw_laptop(draw, cx + 40, vy + 4, vw - 80, vh - 8)
     elif visual == "space":
-        draw_space(draw, cx + 10, vy + 4, vw - 20, vh - 8)
+        draw_space(draw, cx + 10, vy + 2, vw - 20, vh - 4)
     elif visual == "store":
-        draw_store(draw, cx + 10, vy + 4, vw - 20, vh - 8)
+        draw_store(draw, cx + 10, vy + 2, vw - 20, vh - 4)
 
 
 def render():
@@ -302,7 +324,7 @@ def render():
               font=f_sub, fill=INK)
     draw.line([(MARGIN, 126), (W - MARGIN, 126)], fill=RULE, width=3)
 
-    # ---- numbers strip ----
+    # ---- numbers strip (7 stats) ----
     f_numlabel = _font("DejaVuSans-Bold.ttf", 12)
     draw.text((MARGIN, 138), "THE DAY IN", font=f_numlabel, fill=MUTED)
     draw.text((MARGIN, 154), "NUMBERS", font=f_numlabel, fill=MUTED)
@@ -313,11 +335,12 @@ def render():
         ("1,500", "JOBS CUT"),
         ("14", "EXPORT MONTHS"),
         ("19", "STORES CLOSING"),
+        ("$116bn", "NVDA Q3 REV"),
     ]
     f_num = _font("DejaVuSans-Bold.ttf", 26)
     f_numsub = _font("DejaVuSans.ttf", 11)
     sx0 = MARGIN + 118
-    scol = (CONTENT_W - 118) // 6
+    scol = (CONTENT_W - 118) // 7
     for i, (num, lab) in enumerate(stats):
         sx = sx0 + i * scol
         draw.text((sx, 138), num, font=f_num, fill=INK)
@@ -332,28 +355,70 @@ def render():
     cards = [
         dict(cat="THE GULF", key="gulf", flags=["bh", "kw", "ir"],
              headline="Bahrain stops Iranian air attack",
-             deck="Kuwait's defences also countered drones early on Wednesday.",
+             deck="Bahrain's defence force said its air defences intercepted "
+             "Iranian aerial attacks, accusing Tehran of a 'systematic "
+             "hostile approach'. The Interior Ministry issued two threat "
+             "alerts, urging residents to move to safety, then gave the "
+             "all-clear after each. Kuwait's army said its defences were "
+             "countering hostile drones early on Wednesday; it named no "
+             "origin and reported no casualties or damage. On Tuesday, "
+             "Iran's Guards fired drones at a US radar at Sheikh Isa Air "
+             "Base, and the US struck a missile site on Qeshm Island.",
              visual="radar"),
         dict(cat="APEC — SHENZHEN", key="apec",
              flags=["ru", "cn", "us", "ph"],
              headline="Putin lands for APEC summit",
-             deck="Trump meets Marcos, then flies on; trio talks Thursday.",
+             deck="Russian President Vladimir Putin arrived in Shenzhen on "
+             "Wednesday for the 33rd APEC Economic Leaders' Meeting, "
+             "running 18-19 Nov. US President Donald Trump was due to meet "
+             "Philippine President Ferdinand Marcos Jr. in Manila on "
+             "Wednesday, then fly to Shenzhen. The first-ever trilateral "
+             "meeting of Trump, Xi Jinping and Putin is scheduled for "
+             "Thursday 19 Nov, with nuclear arms control expected to top "
+             "the agenda.",
              visual="portraits", portraits=("putin", "trump")),
         dict(cat="MARKETS — AI", key="markets", flags=["kr", "jp"],
              headline="Nvidia beat lifts Asia stocks",
-             deck="Shares +4.7% after hours; KOSPI up 3.3%, Nikkei up 0.6%.",
+             deck="Asian stocks rose on Wednesday after Nvidia reported "
+             "quarterly revenue above forecasts, its first earnings since "
+             "Jensen Huang's abrupt departure as CEO. Nvidia shares rose "
+             "4.7% in after-hours trading. MSCI's Asia-Pacific index "
+             "outside Japan rose 0.9%; South Korea's KOSPI gained as much "
+             "as 3.3% and Japan's Nikkei rose 0.6%. Reuters reports Q3 "
+             "revenue of $116 billion, up 103% year on year.",
              visual="chart"),
         dict(cat="CYBER — JAVA", key="cyber", flags=["kr"],
              headline="Seoul in emergency Java talks",
-             deck="Agencies meet over reported flaws; top websites said hit.",
+             deck="South Korea's presidential office held an emergency "
+             "meeting with government agencies on Wednesday on "
+             "pre-emptive measures against possible security flaws in the "
+             "Java programming language, Yonhap reported. Officials from "
+             "the military, the Ministry of Science and ICT and financial "
+             "supervisory agencies attended. A cybersecurity researcher "
+             "has said some of the world's most visited websites were "
+             "compromised, according to the report.",
              visual="laptop"),
         dict(cat="SPACE", key="space", flags=[],
              headline="Voyager 1 hits one light-day",
-             deck="First human-made object 16bn miles out; signals take a day.",
+             deck="On Wednesday 18 Nov at 5:16 a.m. ET (10:16 UTC), NASA's "
+             "Voyager 1 reached one light-day from Earth, more than 16 "
+             "billion miles (25.9 billion km) away, becoming the first "
+             "human-made object ever to reach that distance. Light, or a "
+             "radio signal, now takes a full 24 hours to reach it. "
+             "Launched in 1977, it is already the most distant "
+             "human-made object; Voyager 2 is not expected to reach one "
+             "light-day until about November 2035.",
              visual="space"),
         dict(cat="BUSINESS", key="business", flags=["au"],
              headline="David Jones to cut 1,500 jobs",
-             deck="19 stores to close after collapse; 170 of 1,689 redeployed.",
+             deck="Troubled Australian department store chain David Jones "
+             "will cut about 1,500 jobs across 19 stores slated for "
+             "closure after collapsing into administration, a union said "
+             "on Wednesday. Only 170 of the 1,689 affected store workers "
+             "had been offered redeployment. The chain entered "
+             "administration on 5 Nov, owing at least A$459 million "
+             "(about $310 million) to creditors, administrators said at a "
+             "creditors' meeting on Tuesday.",
              visual="store"),
     ]
     for i, c in enumerate(cards):
@@ -361,40 +426,55 @@ def render():
                   c["cat"], c["key"], c["flags"], c["headline"], c["deck"],
                   c["visual"], portraits=c.get("portraits", ()))
 
-    # ---- ALSO TODAY strip ----
+    # ---- ALSO TODAY strip: three items, two lines each ----
     by = ys[1] + ch + 14
-    bh = 52
+    bh = 72
     draw.rounded_rectangle([MARGIN, by, W - MARGIN, by + bh], radius=6,
                            fill=NAVY_BAND)
-    f_al = _font("DejaVuSans-Bold.ttf", 14)
-    f_at = _font("DejaVuSans.ttf", 14)
-    ax = MARGIN + 14
+    f_al = _font("DejaVuSans-Bold.ttf", 13)
+    f_lead = _font("DejaVuSans-Bold.ttf", 12)
+    f_det = _font("DejaVuSans.ttf", 11)
     label = "ALSO TODAY:"
-    draw.text((ax, by + (bh - 14) // 2 - 1), label, font=f_al, fill=GOLD)
-    ax += draw.textlength(label, font=f_al) + 8
-    text = "Japan exports up a 14th month  ·  Oil eases  ·  Anthropic due to price its IPO"
-    draw.text((ax, by + (bh - 14) // 2 - 1), text, font=f_at,
-              fill=(255, 255, 255))
-    # Japan flag + ANT chart mark at the right end
-    tx = W - MARGIN - 14
-    f_ant = _font("DejaVuSans-Bold.ttf", 11)
-    ant = "ANT"
-    aw = draw.textlength(ant, font=f_ant)
-    draw.text((tx - aw, by + 8), ant, font=f_ant, fill=(255, 255, 255))
-    draw.line([(tx - aw, by + 44), (tx - aw + 8, by + 38),
-               (tx - aw + 16, by + 41), (tx - aw + 24, by + 32)],
-              fill=(110, 220, 130), width=3)
-    draw_flag(draw, img, "jp", tx - aw - 12, by + 16, 18)
+    lx = MARGIN + 14
+    draw.text((lx, by + (bh - 13) // 2 - 1), label, font=f_al, fill=GOLD)
+    col0 = lx + draw.textlength(label, font=f_al) + 16
+    col_w = (W - MARGIN - 14 - col0) // 3
+    items = [
+        dict(lead="Japan exports", flag="jp",
+             detail="Up a 14th successive month in October."),
+        dict(lead="Oil eases", flag=None,
+             detail="US crude stocks +5.28m barrels; Brent $92.98, WTI $85.45"),
+        dict(lead="Anthropic IPO", flag=None, chart=True,
+             detail="Due to price Wed; Nasdaq debut Thu as ANT, $70-78 a share"),
+    ]
+    for j, it in enumerate(items):
+        cx = col0 + j * col_w
+        tx = cx
+        if it.get("flag"):
+            # flag at the lead line, then the lead text after it
+            draw_flag(draw, img, it["flag"], cx + 22, by + 10, 14)
+            tx = cx + 28
+        draw.text((tx, by + 10), it["lead"], font=f_lead,
+                  fill=(255, 255, 255))
+        if it.get("chart"):
+            lw = draw.textlength(it["lead"], font=f_lead)
+            gx = tx + lw + 8
+            draw.line([(gx, by + 24), (gx + 8, by + 18), (gx + 16, by + 21),
+                       (gx + 24, by + 12)], fill=(110, 220, 130), width=3)
+        dy = by + 30
+        for line in wrap_text(draw, it["detail"], f_det, col_w - 8):
+            draw.text((cx, dy), line, font=f_det, fill=(215, 222, 235))
+            dy += 15
 
     # ---- footer ----
     f_foot = _font("DejaVuSans.ttf", 11)
     f_foot_i = _font("DejaVuSerif.ttf", 11)
-    fy = by + bh + 12
+    fy = by + bh + 10
     s1 = "Sources: Reuters · Xinhua · France 24 · NASA · Yonhap · AP"
     draw.text(((W - draw.textlength(s1, font=f_foot)) / 2, fy), s1,
               font=f_foot, fill=MUTED)
     s2 = "Every story above was reported on Wednesday 18 November 2026."
-    draw.text(((W - draw.textlength(s2, font=f_foot_i)) / 2, fy + 17), s2,
+    draw.text(((W - draw.textlength(s2, font=f_foot_i)) / 2, fy + 15), s2,
               font=f_foot_i, fill=MUTED)
     return img
 
